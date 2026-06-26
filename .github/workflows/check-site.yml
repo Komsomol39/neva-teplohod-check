@@ -1,4 +1,4 @@
-name: Check Bitrix24 Script on neva-teplohod.ru
+name: Check Bitrix24 Button
 
 on:
   workflow_dispatch:
@@ -13,87 +13,94 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Install dependencies
+      - name: Check site HTML
         run: |
-          pip install requests beautifulsoup4 2>/dev/null || true
+          curl -s -L \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            -H "Accept: text/html,application/xhtml+xml" \
+            -H "Accept-Language: ru-RU,ru;q=0.9" \
+            "https://neva-teplohod.ru/" > page.html
+          echo "Page size: $(wc -c < page.html) bytes"
 
-      - name: Check site for Bitrix24 script
+      - name: Analyze button and script
         run: |
           python3 << 'EOF'
-          import urllib.request
+          with open("page.html", "r", encoding="utf-8", errors="replace") as f:
+              html = f.read()
+
           import re
 
-          url = "https://neva-teplohod.ru/"
-          headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
-          
-          req = urllib.request.Request(url, headers=headers)
-          with urllib.request.urlopen(req, timeout=30) as r:
-              html = r.read().decode("utf-8", errors="replace")
-          
-          print("=== ПРОВЕРКА СКРИПТА БИТРИКС24 ===")
+          print("=" * 50)
+          print("1. СКРИПТ БИТРИКС24")
+          print("=" * 50)
+          has_loader = "loader_79" in html
+          has_cdn = "cdn-ru.bitrix24.ru" in html
+          print(f"  loader_79.js в HTML: {has_loader}")
+          print(f"  cdn-ru.bitrix24.ru в HTML: {has_cdn}")
+
           print()
-          
-          # 1. Проверяем наличие скрипта загрузчика
-          has_loader = "loader_79.js" in html or "b22220546" in html
-          has_b24form = 'data-b24-form="click/79/sey0y6"' in html
-          has_bitrix_cdn = "cdn-ru.bitrix24.ru" in html
-          
-          print(f"[{'OK' if has_loader else 'FAIL'}] loader_79.js найден в HTML: {has_loader}")
-          print(f"[{'OK' if has_b24form else 'FAIL'}] data-b24-form атрибут найден: {has_b24form}")
-          print(f"[{'OK' if has_bitrix_cdn else 'FAIL'}] cdn-ru.bitrix24.ru найден: {has_bitrix_cdn}")
+          print("=" * 50)
+          print("2. КНОПКА #open-b24-form")
+          print("=" * 50)
+          # Ищем элемент с id=open-b24-form
+          btn_id = re.findall(r'<[^>]*id=["\']?open-b24-form["\']?[^>]*>', html)
+          print(f"  Найдено элементов с id=open-b24-form: {len(btn_id)}")
+          for b in btn_id:
+              print(f"  -> {b[:300]}")
+
           print()
-          
-          # 2. Проверяем кнопки
-          buttons = re.findall(r'<a[^>]*elementor-button[^>]*>.*?</a>', html, re.DOTALL)
-          b24_buttons = [b for b in buttons if "b24" in b.lower() or "bitrix" in b.lower() or "openForm" in b]
-          
-          print(f"Всего elementor-кнопок найдено: {len(buttons)}")
-          print(f"Кнопок с Битрикс24 привязкой: {len(b24_buttons)}")
+          print("=" * 50)
+          print("3. ВСЕ КНОПКИ ОСТАВИТЬ ЗАЯВКУ")
+          print("=" * 50)
+          # Ищем все ссылки/кнопки с текстом
+          btns = re.findall(r'<a[^>]*>(?:[^<]|<(?!/?a))*?[Оо]ставить заявку(?:[^<]|<(?!/?a))*?</a>', html, re.DOTALL)
+          print(f"  Найдено кнопок-ссылок: {len(btns)}")
+          for i, b in enumerate(btns):
+              clean = re.sub(r'\s+', ' ', b).strip()
+              print(f"  Кнопка {i+1}: {clean[:400]}")
+
           print()
-          
-          # 3. Ищем все скрипты в footer
-          footer_match = re.search(r'</main>(.*?)</body>', html, re.DOTALL)
-          if footer_match:
-              footer = footer_match.group(1)
-              has_b24_in_footer = "bitrix24" in footer.lower() or "b24" in footer.lower() or "loader_79" in footer
-              print(f"[{'OK' if has_b24_in_footer else 'FAIL'}] Скрипт Битрикс24 в footer: {has_b24_in_footer}")
-          
-          # 4. Ищем WPCode вывод
-          has_wpcode = "wpcode" in html.lower()
-          print(f"WPCode активен на странице: {has_wpcode}")
+          print("=" * 50)
+          print("4. ВТОРОЙ СКРИПТ (обработчик клика)")
+          print("=" * 50)
+          scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
+          for i, s in enumerate(scripts):
+              if "open-b24-form" in s or "openForm" in s or "DOMContentLoaded" in s:
+                  print(f"  Script #{i+1}:")
+                  print(s.strip()[:600])
+                  print()
+
           print()
+          print("=" * 50)
+          print("5. ДИАГНОЗ")
+          print("=" * 50)
+          has_handler = any("open-b24-form" in s or "openForm" in s for s in scripts)
+          has_btn_id = len(btn_id) > 0
           
-          # 5. Контекст вокруг b24
-          if has_bitrix_cdn:
-              idx = html.find("cdn-ru.bitrix24.ru")
-              print("=== НАЙДЕННЫЙ КОД БИТРИКС24 ===")
-              print(html[max(0,idx-200):idx+300])
+          # Проверяем href кнопок
+          href_hash = any('href="#"' in b or "href=\'#\')" in b for b in btns)
+          
+          if not has_loader:
+              print("  ПРОБЛЕМА: скрипт загрузчика Битрикс24 не найден!")
+          elif not has_btn_id:
+              print("  ПРОБЛЕМА: кнопка с id=open-b24-form не найдена!")
+              print("  Elementor, возможно, не опубликовал изменения.")
+          elif not has_handler:
+              print("  ПРОБЛЕМА: обработчик клика (второй скрипт) не найден!")
           else:
-              print("=== СКРИПТ БИТРИКС24 НЕ НАЙДЕН В HTML ===")
-              print()
-              print("ВОЗМОЖНЫЕ ПРИЧИНЫ:")
-              print("1. Скрипт не сохранён в WPCode (забыли нажать Save)")
-              print("2. Скрипт вставлен в Header вместо Footer")  
-              print("3. WPCode сниппет не активирован (переключатель выключен)")
-              print("4. Кеш страницы — нужно очистить кеш WordPress")
-              print("5. Скрипт вставлен в неправильное место")
+              print("  Всё на месте. Проблема может быть в порядке загрузки скриптов.")
+              print("  Битрикс24 loader может грузиться после DOMContentLoaded.")
           
-          print()
-          print("=== КНОПКИ 'ОСТАВИТЬ ЗАЯВКУ' ===")
-          leave_btns = re.findall(r'<a[^>]*>[^<]*[Оо]ставить заявку[^<]*</a>|<span[^>]*elementor-button-text[^>]*>[^<]*[Оо]ставить заявку[^<]*</span>', html)
-          for i, btn in enumerate(leave_btns):
-              print(f"Кнопка {i+1}: {btn[:200]}")
-          EOF
+          if btns:
+              first_btn = btns[0]
+              if 'href="#"' in first_btn:
+                  print("  ПРОБЛЕМА: href='#' вызывает скролл вверх/вниз страницы!")
+                  print("  Нужно заменить на href='javascript:void(0)'")
+          'EOF'
 
-      - name: Save results
-        if: always()
-        run: |
-          echo "Done at $(date)" > check-result-timestamp.txt
-
-      - name: Upload results
+      - name: Upload page snapshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: site-check-results
-          path: |
-            check-result-timestamp.txt
+          name: page-snapshot
+          path: page.html
