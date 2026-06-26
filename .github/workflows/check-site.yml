@@ -34,62 +34,108 @@ jobs:
             });
             const page = await browser.newPage();
             const logs = [];
-            const log = (msg) => { console.log(msg); logs.push(msg); };
+            const log = (msg) => { console.log(msg); logs.push(String(msg)); };
 
-            page.on('console', msg => log('BROWSER ' + msg.type() + ': ' + msg.text()));
+            page.on('console', msg => log('BROWSER: ' + msg.text()));
             page.on('pageerror', err => log('PAGEERROR: ' + err.message));
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-            
-            log('Opening page...');
             await page.goto('https://neva-teplohod.ru/', {waitUntil: 'networkidle2', timeout: 60000});
-            await new Promise(r => setTimeout(r, 4000));
+            await new Promise(r => setTimeout(r, 5000));
 
             const result = await page.evaluate(() => {
-              const buttons = Array.from(document.querySelectorAll('a, button')).filter(el => 
+              // Проверяем все скрипты в footer
+              const allScripts = Array.from(document.querySelectorAll('script')).map(s => ({
+                dataB24: s.getAttribute('data-b24-form'),
+                preview: (s.textContent || '').slice(0, 400)
+              })).filter(s => s.dataB24 || s.preview.includes('b24') || s.preview.includes('Оставить') || s.preview.includes('b24form'));
+
+              // Кнопки
+              const buttons = Array.from(document.querySelectorAll('a.elementor-button')).filter(el =>
                 (el.innerText || '').includes('Оставить заявку')
               ).map(el => ({
-                tag: el.tagName,
-                href: el.href || el.getAttribute('href'),
-                id: el.id,
-                dataB24: el.getAttribute('data-b24-form'),
-                outerHTML: el.outerHTML.slice(0, 300)
+                href: el.getAttribute('href'),
+                onclick: el.getAttribute('onclick'),
+                hasOnclick: typeof el.onclick === 'function',
+                id: el.id
               }));
 
-              const b24scripts = Array.from(document.querySelectorAll('script')).filter(s =>
-                s.getAttribute('data-b24-form') || 
-                (s.textContent && s.textContent.includes('bitrix24'))
-              ).map(s => ({
-                dataB24: s.getAttribute('data-b24-form'),
-                preview: s.textContent ? s.textContent.slice(0, 300) : null
-              }));
+              // Проверяем window объекты
+              const b24keys = window.b24form ? Object.keys(window.b24form) : [];
+              const appMethods = (window.b24form && window.b24form.App) 
+                ? Object.getOwnPropertyNames(Object.getPrototypeOf(window.b24form.App.create({type:'click',id:'79',sec:'sey0y6'})))
+                : [];
 
-              return {
-                b24formExists: typeof window.b24form !== 'undefined',
-                b24formKeys: window.b24form ? Object.keys(window.b24form) : [],
-                b24AppExists: window.b24form && window.b24form.App ? true : false,
-                buttons,
-                b24scripts,
-                b24elements: Array.from(document.querySelectorAll('[data-b24-form]')).map(el => ({
-                  tag: el.tagName,
-                  value: el.getAttribute('data-b24-form'),
-                  b24formProp: typeof el.b24form
-                }))
-              };
+              return { allScripts, buttons, b24keys, appMethods };
             });
 
-            log('\n=== РЕЗУЛЬТАТ ===');
-            log('b24form загружен: ' + result.b24formExists);
-            log('b24form.App есть: ' + result.b24AppExists);
-            log('b24form ключи: ' + JSON.stringify(result.b24formKeys));
-            log('\n--- Кнопки Оставить заявку (' + result.buttons.length + ') ---');
-            result.buttons.forEach((b,i) => log('  ' + (i+1) + ') ' + JSON.stringify(b)));
-            log('\n--- Элементы с data-b24-form ---');
-            result.b24elements.forEach((e,i) => log('  ' + (i+1) + ') ' + JSON.stringify(e)));
-            log('\n--- Скрипты Битрикс24 ---');
-            result.b24scripts.forEach((s,i) => log('  ' + (i+1) + ') dataB24=' + s.dataB24 + ' | ' + (s.preview||'').slice(0,150)));
+            log('
+=== СКРИПТЫ С b24 ===');
+            result.allScripts.forEach((s,i) => {
+              log('Script ' + (i+1) + ':');
+              log('  dataB24: ' + s.dataB24);
+              log('  preview: ' + s.preview.replace(/
+/g,' ').slice(0,300));
+            });
 
-            fs.writeFileSync('debug-result.txt', logs.join('\n'));
+            log('
+=== КНОПКИ ===');
+            result.buttons.forEach((b,i) => {
+              log('Button ' + (i+1) + ': href=' + b.href + ' | onclick attr=' + b.onclick + ' | onclick func=' + b.hasOnclick + ' | id=' + b.id);
+            });
+
+            log('
+=== APP METHODS ===');
+            log(JSON.stringify(result.appMethods));
+
+            // Пробуем кликнуть кнопку и смотрим что происходит
+            log('
+=== КЛИК ПО КНОПКЕ ===');
+            const clickResult = await page.evaluate(() => {
+              const btn = Array.from(document.querySelectorAll('a.elementor-button'))
+                .find(el => (el.innerText||'').includes('Оставить заявку'));
+              if (!btn) return 'NO BUTTON';
+              
+              // Проверяем слушателей через клонирование
+              const errors = [];
+              try {
+                btn.click();
+              } catch(e) {
+                errors.push(e.message);
+              }
+              
+              // Проверяем что открылось
+              setTimeout(() => {}, 1000);
+              const modal = document.querySelector('.b24-form-wrapper, .b24-form, [class*="b24"], .bx-crm-form');
+              return {
+                btnHref: btn.getAttribute('href'),
+                btnOnclick: btn.getAttribute('onclick'),
+                modalFound: modal ? modal.className : null,
+                errors
+              };
+            });
+            log(JSON.stringify(clickResult));
+
+            await new Promise(r => setTimeout(r, 2000));
+
+            // Проверяем появился ли попап после клика
+            const afterClick = await page.evaluate(() => {
+              const modals = document.querySelectorAll('[class*="b24-form"], [class*="bx24-form"], [id*="b24-form"]');
+              const visible = Array.from(modals).filter(m => {
+                const style = window.getComputedStyle(m);
+                return style.display !== 'none' && style.visibility !== 'hidden';
+              });
+              return {
+                totalModals: modals.length,
+                visibleModals: visible.map(m => m.className + ' | display:' + window.getComputedStyle(m).display)
+              };
+            });
+            log('
+=== ПОПАП ПОСЛЕ КЛИКА ===');
+            log(JSON.stringify(afterClick));
+
+            fs.writeFileSync('debug-result.txt', logs.join('
+'));
             await browser.close();
           })();
           JSEOF
@@ -100,5 +146,5 @@ jobs:
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
           git add debug-result.txt
-          git commit -m "debug result $(date)" || echo "nothing to commit"
+          git diff --staged --quiet || git commit -m "debug $(date +%s)"
           git push
