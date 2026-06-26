@@ -13,94 +13,112 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Check site HTML
+      - name: Install wget + try multiple methods
         run: |
-          curl -s -L \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
-            -H "Accept: text/html,application/xhtml+xml" \
-            -H "Accept-Language: ru-RU,ru;q=0.9" \
-            "https://neva-teplohod.ru/" > page.html
-          echo "Page size: $(wc -c < page.html) bytes"
+          # Метод 1: wget с куками и полными заголовками
+          wget -q --no-check-certificate \
+            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            --header="Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+            --header="Accept-Language: ru-RU,ru;q=0.9,en;q=0.8" \
+            --header="Accept-Encoding: gzip, deflate, br" \
+            --header="Connection: keep-alive" \
+            --header="Upgrade-Insecure-Requests: 1" \
+            -O page.html "https://neva-teplohod.ru/" 2>&1 || true
+          
+          SIZE=$(wc -c < page.html 2>/dev/null || echo 0)
+          echo "Method 1 (wget) size: $SIZE"
+          
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "wget failed, trying curl with random IP..."
+            curl -s -L --max-time 30 \
+              -H "User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0" \
+              -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" \
+              -H "Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3" \
+              -H "Accept-Encoding: gzip, deflate, br" \
+              -H "DNT: 1" \
+              -H "Connection: keep-alive" \
+              -H "Upgrade-Insecure-Requests: 1" \
+              --compressed \
+              "https://neva-teplohod.ru/" -o page.html || true
+            echo "Method 2 (curl Firefox UA) size: $(wc -c < page.html)"
+          fi
 
-      - name: Analyze button and script
+      - name: Check HTTP status
         run: |
-          python3 << 'EOF'
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            "https://neva-teplohod.ru/")
+          echo "HTTP Status: $STATUS"
+          
+          # Посмотрим заголовки ответа
+          curl -s -I \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            "https://neva-teplohod.ru/" | head -20
+
+      - name: Analyze if page loaded
+        run: |
+          SIZE=$(wc -c < page.html 2>/dev/null || echo 0)
+          echo "Final page size: $SIZE bytes"
+          
+          if [ "$SIZE" -gt 5000 ]; then
+            python3 << 'PYEOF'
           with open("page.html", "r", encoding="utf-8", errors="replace") as f:
               html = f.read()
-
           import re
 
           print("=" * 50)
-          print("1. СКРИПТ БИТРИКС24")
-          print("=" * 50)
-          has_loader = "loader_79" in html
-          has_cdn = "cdn-ru.bitrix24.ru" in html
-          print(f"  loader_79.js в HTML: {has_loader}")
-          print(f"  cdn-ru.bitrix24.ru в HTML: {has_cdn}")
-
+          print("СКРИПТ БИТРИКС24:", "НАЙДЕН" if "loader_79" in html else "НЕ НАЙДЕН")
+          print("cdn-ru.bitrix24.ru:", "НАЙДЕН" if "cdn-ru.bitrix24.ru" in html else "НЕ НАЙДЕН")
           print()
-          print("=" * 50)
-          print("2. КНОПКА #open-b24-form")
-          print("=" * 50)
-          # Ищем элемент с id=open-b24-form
+          
           btn_id = re.findall(r'<[^>]*id=["\']?open-b24-form["\']?[^>]*>', html)
-          print(f"  Найдено элементов с id=open-b24-form: {len(btn_id)}")
+          print(f"Кнопка #open-b24-form: {'НАЙДЕНА' if btn_id else 'НЕ НАЙДЕНА'}")
           for b in btn_id:
-              print(f"  -> {b[:300]}")
-
+              print(f"  HTML: {b[:300]}")
           print()
-          print("=" * 50)
-          print("3. ВСЕ КНОПКИ ОСТАВИТЬ ЗАЯВКУ")
-          print("=" * 50)
-          # Ищем все ссылки/кнопки с текстом
-          btns = re.findall(r'<a[^>]*>(?:[^<]|<(?!/?a))*?[Оо]ставить заявку(?:[^<]|<(?!/?a))*?</a>', html, re.DOTALL)
-          print(f"  Найдено кнопок-ссылок: {len(btns)}")
-          for i, b in enumerate(btns):
-              clean = re.sub(r'\s+', ' ', b).strip()
-              print(f"  Кнопка {i+1}: {clean[:400]}")
-
-          print()
-          print("=" * 50)
-          print("4. ВТОРОЙ СКРИПТ (обработчик клика)")
-          print("=" * 50)
+          
           scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
-          for i, s in enumerate(scripts):
-              if "open-b24-form" in s or "openForm" in s or "DOMContentLoaded" in s:
-                  print(f"  Script #{i+1}:")
-                  print(s.strip()[:600])
-                  print()
+          handler = [s for s in scripts if "open-b24-form" in s or "openForm" in s]
+          print(f"Обработчик клика: {'НАЙДЕН' if handler else 'НЕ НАЙДЕН'}")
+          for h in handler:
+              print(h.strip()[:400])
+          print()
+
+          # Кнопки с href
+          btns = re.findall(r'<a[^>]*>[\s\S]*?[Оо]ставить заявку[\s\S]*?</a>', html)
+          print(f"Кнопок 'Оставить заявку': {len(btns)}")
+          for i, b in enumerate(btns[:3]):
+              clean = re.sub(r'\s+', ' ', b).strip()
+              print(f"  [{i+1}] {clean[:300]}")
 
           print()
           print("=" * 50)
-          print("5. ДИАГНОЗ")
-          print("=" * 50)
-          has_handler = any("open-b24-form" in s or "openForm" in s for s in scripts)
-          has_btn_id = len(btn_id) > 0
-          
-          # Проверяем href кнопок
-          href_hash = any('href="#"' in b or "href=\'#\')" in b for b in btns)
-          
-          if not has_loader:
-              print("  ПРОБЛЕМА: скрипт загрузчика Битрикс24 не найден!")
-          elif not has_btn_id:
-              print("  ПРОБЛЕМА: кнопка с id=open-b24-form не найдена!")
-              print("  Elementor, возможно, не опубликовал изменения.")
-          elif not has_handler:
-              print("  ПРОБЛЕМА: обработчик клика (второй скрипт) не найден!")
+          print("ДИАГНОЗ:")
+          if "loader_79" not in html:
+              print("  ОШИБКА: скрипт Битрикс24 не загружается на странице!")
+          elif not btn_id:
+              print("  ОШИБКА: кнопка не опубликована в Elementor (нет id=open-b24-form)")
+              print("  -> Нажмите ОПУБЛИКОВАТЬ в Elementor!")
+          elif not handler:
+              print("  ОШИБКА: нет обработчика клика в WPCode!")
           else:
-              print("  Всё на месте. Проблема может быть в порядке загрузки скриптов.")
-              print("  Битрикс24 loader может грузиться после DOMContentLoaded.")
-          
-          if btns:
-              first_btn = btns[0]
-              if 'href="#"' in first_btn:
-                  print("  ПРОБЛЕМА: href='#' вызывает скролл вверх/вниз страницы!")
-                  print("  Нужно заменить на href='javascript:void(0)'")
-          'EOF'
+              print("  Всё на месте. Проблема в порядке загрузки скриптов.")
+              # Проверяем href
+              for b in btns:
+                  if "open-b24-form" in b:
+                      if 'href="#"' in b:
+                          print("  ПРИЧИНА СКРОЛЛА: href='#' — страница скроллится наверх!")
+                          print("  РЕШЕНИЕ: поставить href='javascript:void(0)'")
+          'PYEOF'
+          else
+            echo "СТРАНИЦА НЕ ЗАГРУЗИЛАСЬ (размер $SIZE байт)"
+            echo "Сайт блокирует запросы от GitHub Actions (возможно Cloudflare)"
+            cat page.html
+          fi
 
-      - name: Upload page snapshot
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: page-snapshot
+          name: site-analysis
           path: page.html
