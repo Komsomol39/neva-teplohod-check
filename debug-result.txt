@@ -1,0 +1,25 @@
+Opening page...
+BROWSER log: JQMIGRATE: Migrate is installed, version 3.4.1
+BROWSER info: Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://fonts.gstatic.com/s/hind/v18/5aU19_a8oxmIfJpbERySiA.ttf
+BROWSER warn: The specified value "ÐÐ°ÑÐ° Ð¼ÐµÑÐ¾Ð¿ÑÐ¸ÑÑÐ¸Ñ" does not conform to the required format, "yyyy-MM-dd".
+BROWSER error: Failed to load resource: the server responded with a status of 404 ()
+
+=== РЕЗУЛЬТАТ ===
+b24form загружен: true
+b24form.App есть: true
+b24form ключи: ["Loader","util","common","App","Compatibility"]
+
+--- Кнопки Оставить заявку (6) ---
+  1) {"tag":"A","href":"https://neva-teplohod.ru/#","id":"open-b24-form","dataB24":null,"outerHTML":"<a class=\"elementor-button elementor-button-link elementor-size-sm\" href=\"#\" id=\"open-b24-form\">\n\t\t\t\t\t\t<span class=\"elementor-button-content-wrapper\">\n\t\t\t\t\t\t\t\t\t<span class=\"elementor-button-text\">Оставить заявку</span>\n\t\t\t\t\t</span>\n\t\t\t\t\t</a>"}
+  2) {"tag":"A","href":"https://neva-teplohod.ru/#","id":"open-b24-form","dataB24":null,"outerHTML":"<a class=\"elementor-button elementor-button-link elementor-size-sm\" href=\"#\" id=\"open-b24-form\">\n\t\t\t\t\t\t<span class=\"elementor-button-content-wrapper\">\n\t\t\t\t\t\t\t\t\t<span class=\"elementor-button-text\">Оставить заявку</span>\n\t\t\t\t\t</span>\n\t\t\t\t\t</a>"}
+  3) {"tag":"A","href":"https://neva-teplohod.ru/#","id":"","dataB24":null,"outerHTML":"<a class=\"elementor-button elementor-button-link elementor-size-sm\" href=\"#\">\n\t\t\t\t\t\t<span class=\"elementor-button-content-wrapper\">\n\t\t\t\t\t\t\t\t\t<span class=\"elementor-button-text\">Оставить заявку</span>\n\t\t\t\t\t</span>\n\t\t\t\t\t</a>"}
+  4) {"tag":"A","href":"https://neva-teplohod.ru/#","id":"","dataB24":null,"outerHTML":"<a class=\"elementor-button elementor-button-link elementor-size-sm\" href=\"#\">\n\t\t\t\t\t\t<span class=\"elementor-button-content-wrapper\">\n\t\t\t\t\t\t\t\t\t<span class=\"elementor-button-text\">Оставить заявку</span>\n\t\t\t\t\t</span>\n\t\t\t\t\t</a>"}
+  5) {"tag":"A","href":"https://neva-teplohod.ru/#","id":"","dataB24":null,"outerHTML":"<a class=\"elementor-button elementor-button-link elementor-size-sm\" href=\"#\">\n\t\t\t\t\t\t<span class=\"elementor-button-content-wrapper\">\n\t\t\t\t\t\t\t\t\t<span class=\"elementor-button-text\">Оставить заявку</span>\n\t\t\t\t\t</span>\n\t\t\t\t\t</a>"}
+  6) {"tag":"A","href":"https://neva-teplohod.ru/#","id":"","dataB24":null,"outerHTML":"<a class=\"elementor-button elementor-button-link elementor-size-sm\" href=\"#\">\n\t\t\t\t\t\t<span class=\"elementor-button-content-wrapper\">\n\t\t\t\t\t\t\t\t\t<span class=\"elementor-button-text\">Оставить заявку</span>\n\t\t\t\t\t</span>\n\t\t\t\t\t</a>"}
+
+--- Элементы с data-b24-form ---
+  1) {"tag":"DIV","value":"click/79/sey0y6","b24formProp":"undefined"}
+  2) {"tag":"SCRIPT","value":"click/79/sey0y6","b24formProp":"undefined"}
+
+--- Скрипты Битрикс24 ---
+  1) dataB24=click/79/sey0y6 | (function(w,d,u){var s=d.createElement('script');s.async=true;s.src=u+'?'+(Date.now()/180000|0);var h=d.getElementsByTagName('script')[0];h.parentNode
