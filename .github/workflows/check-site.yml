@@ -25,6 +25,7 @@ jobs:
         run: |
           node << 'JSEOF'
           const puppeteer = require('puppeteer');
+          const fs = require('fs');
 
           (async () => {
             const browser = await puppeteer.launch({
@@ -32,140 +33,72 @@ jobs:
               args: ['--no-sandbox', '--disable-setuid-sandbox']
             });
             const page = await browser.newPage();
+            const logs = [];
+            const log = (msg) => { console.log(msg); logs.push(msg); };
 
-            // Перехватываем консольные сообщения
-            const consoleLogs = [];
-            page.on('console', msg => consoleLogs.push(msg.type() + ': ' + msg.text()));
-            page.on('pageerror', err => consoleLogs.push('PAGEERROR: ' + err.message));
+            page.on('console', msg => log('BROWSER ' + msg.type() + ': ' + msg.text()));
+            page.on('pageerror', err => log('PAGEERROR: ' + err.message));
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
             
-            console.log('Opening page...');
+            log('Opening page...');
             await page.goto('https://neva-teplohod.ru/', {waitUntil: 'networkidle2', timeout: 60000});
-            
-            // Ждём загрузки скриптов
-            await new Promise(r => setTimeout(r, 3000));
+            await new Promise(r => setTimeout(r, 4000));
 
-            console.log('\n=== CONSOLE LOGS ===');
-            consoleLogs.forEach(l => console.log(l));
+            const result = await page.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll('a, button')).filter(el => 
+                (el.innerText || '').includes('Оставить заявку')
+              ).map(el => ({
+                tag: el.tagName,
+                href: el.href || el.getAttribute('href'),
+                id: el.id,
+                dataB24: el.getAttribute('data-b24-form'),
+                outerHTML: el.outerHTML.slice(0, 300)
+              }));
 
-            // Проверяем наличие скрипта Битрикс24
-            const b24check = await page.evaluate(() => {
+              const b24scripts = Array.from(document.querySelectorAll('script')).filter(s =>
+                s.getAttribute('data-b24-form') || 
+                (s.textContent && s.textContent.includes('bitrix24'))
+              ).map(s => ({
+                dataB24: s.getAttribute('data-b24-form'),
+                preview: s.textContent ? s.textContent.slice(0, 300) : null
+              }));
+
               return {
-                hasB24form: typeof window.b24form !== 'undefined',
-                b24formType: typeof window.b24form,
+                b24formExists: typeof window.b24form !== 'undefined',
                 b24formKeys: window.b24form ? Object.keys(window.b24form) : [],
-                hasB24formInit: typeof window.b24form !== 'undefined' && typeof window.b24form.App !== 'undefined',
-                // Все элементы с data-b24-form
+                b24AppExists: window.b24form && window.b24form.App ? true : false,
+                buttons,
+                b24scripts,
                 b24elements: Array.from(document.querySelectorAll('[data-b24-form]')).map(el => ({
                   tag: el.tagName,
                   value: el.getAttribute('data-b24-form'),
-                  hasB24formProp: typeof el.b24form !== 'undefined'
-                })),
-                // Кнопки Оставить заявку
-                buttons: Array.from(document.querySelectorAll('a, button')).filter(el => 
-                  (el.innerText || '').includes('Оставить заявку')
-                ).map(el => ({
-                  tag: el.tagName,
-                  href: el.href || el.getAttribute('href'),
-                  id: el.id,
-                  classes: el.className,
-                  dataB24: el.getAttribute('data-b24-form'),
-                  hasClickListener: typeof el.onclick !== 'undefined'
+                  b24formProp: typeof el.b24form
                 }))
               };
             });
 
-            console.log('\n=== BITRIX24 STATUS ===');
-            console.log('window.b24form exists:', b24check.hasB24formInit);
-            console.log('b24form type:', b24check.b24formType);
-            console.log('b24form keys:', JSON.stringify(b24check.b24formKeys));
-            
-            console.log('\n=== ELEMENTS WITH data-b24-form ===');
-            b24check.b24elements.forEach(el => {
-              console.log(el.tag, '|', el.value, '| b24form prop:', el.hasB24formProp);
-            });
+            log('\n=== РЕЗУЛЬТАТ ===');
+            log('b24form загружен: ' + result.b24formExists);
+            log('b24form.App есть: ' + result.b24AppExists);
+            log('b24form ключи: ' + JSON.stringify(result.b24formKeys));
+            log('\n--- Кнопки Оставить заявку (' + result.buttons.length + ') ---');
+            result.buttons.forEach((b,i) => log('  ' + (i+1) + ') ' + JSON.stringify(b)));
+            log('\n--- Элементы с data-b24-form ---');
+            result.b24elements.forEach((e,i) => log('  ' + (i+1) + ') ' + JSON.stringify(e)));
+            log('\n--- Скрипты Битрикс24 ---');
+            result.b24scripts.forEach((s,i) => log('  ' + (i+1) + ') dataB24=' + s.dataB24 + ' | ' + (s.preview||'').slice(0,150)));
 
-            console.log('\n=== BUTTONS "ОСТАВИТЬ ЗАЯВКУ" ===');
-            b24check.buttons.forEach((btn, i) => {
-              console.log('Button', i+1, ':', JSON.stringify(btn));
-            });
-
-            // Пробуем кликнуть на первую кнопку и смотрим что происходит
-            console.log('\n=== CLICKING BUTTON ===');
-            
-            const clickResult = await page.evaluate(() => {
-              const btn = Array.from(document.querySelectorAll('a, button')).find(el => 
-                (el.innerText || '').includes('Оставить заявку')
-              );
-              if (!btn) return 'NO BUTTON FOUND';
-              
-              // Проверяем обработчики событий через getEventListeners (только в DevTools)
-              // Пробуем через jQuery если есть
-              let jqEvents = 'no jQuery';
-              if (window.jQuery && window.jQuery._data) {
-                try {
-                  const events = window.jQuery._data(btn, 'events');
-                  jqEvents = events ? JSON.stringify(Object.keys(events)) : 'no jQuery events';
-                } catch(e) { jqEvents = 'jQuery error: ' + e.message; }
-              }
-              
-              return {
-                tag: btn.tagName,
-                href: btn.href,
-                id: btn.id,
-                dataB24: btn.getAttribute('data-b24-form'),
-                jqEvents: jqEvents,
-                outerHTML: btn.outerHTML.slice(0, 500)
-              };
-            });
-            
-            console.log('First button details:', JSON.stringify(clickResult, null, 2));
-
-            // Проверяем все скрипты в body
-            const scripts = await page.evaluate(() => {
-              return Array.from(document.querySelectorAll('script')).map(s => ({
-                src: s.src || null,
-                dataB24: s.getAttribute('data-b24-form'),
-                preview: s.textContent ? s.textContent.slice(0, 200) : null
-              })).filter(s => 
-                s.dataB24 || 
-                (s.preview && (s.preview.includes('b24') || s.preview.includes('bitrix')))
-              );
-            });
-            
-            console.log('\n=== B24 SCRIPTS ===');
-            scripts.forEach((s, i) => {
-              console.log('Script', i+1, ':', JSON.stringify(s));
-            });
-
-            // Проверяем событие b24:form:init
-            const formInitCheck = await page.evaluate(() => {
-              return new Promise(resolve => {
-                let received = false;
-                window.addEventListener('b24:form:init', function(e) {
-                  received = true;
-                  resolve({
-                    received: true,
-                    formId: e.detail && e.detail.object ? e.detail.object.identification : null
-                  });
-                });
-                setTimeout(() => {
-                  if (!received) resolve({received: false});
-                }, 5000);
-              });
-            });
-            
-            console.log('\n=== b24:form:init EVENT ===');
-            console.log(JSON.stringify(formInitCheck));
-
+            fs.writeFileSync('debug-result.txt', logs.join('\n'));
             await browser.close();
           })();
           JSEOF
 
-      - name: Upload results
+      - name: Save results to repo
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-results
-          path: "*.png"
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add debug-result.txt
+          git commit -m "debug result $(date)" || echo "nothing to commit"
+          git push
