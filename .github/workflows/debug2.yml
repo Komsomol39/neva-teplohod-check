@@ -1,0 +1,60 @@
+name: Debug B24 v2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm install puppeteer
+      - name: Run debug
+        run: |
+          node -e "
+          const puppeteer = require('puppeteer');
+          const fs = require('fs');
+          (async () => {
+            const browser = await puppeteer.launch({headless:true,args:['--no-sandbox']});
+            const page = await browser.newPage();
+            const logs = [];
+            const log = m => { console.log(m); logs.push(String(m)); };
+            page.on('console', m => log('BROWSER: '+m.text()));
+            page.on('pageerror', e => log('ERR: '+e.message));
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0');
+            await page.goto('https://neva-teplohod.ru/', {waitUntil:'networkidle2',timeout:60000});
+            await new Promise(r=>setTimeout(r,5000));
+            const r = await page.evaluate(() => {
+              const btns = Array.from(document.querySelectorAll('a.elementor-button'))
+                .filter(e=>(e.innerText||'').includes('Оставить заявку'))
+                .map(e=>({href:e.getAttribute('href'),id:e.id,onclick:!!e.onclick,dataB24:e.getAttribute('data-b24-form')}));
+              const scripts = Array.from(document.querySelectorAll('script'))
+                .filter(s=>s.getAttribute('data-b24-form')||(s.textContent||'').includes('b24form')||( s.textContent||'').includes('Оставить'))
+                .map(s=>({dataB24:s.getAttribute('data-b24-form'),text:(s.textContent||'').slice(0,500)}));
+              return {
+                b24exists: typeof window.b24form!=='undefined',
+                b24App: !!(window.b24form&&window.b24form.App),
+                btns, scripts
+              };
+            });
+            log('b24form: '+r.b24exists+', App: '+r.b24App);
+            log('Buttons: '+JSON.stringify(r.btns,null,2));
+            log('Scripts: '+JSON.stringify(r.scripts,null,2));
+            fs.writeFileSync('debug2.txt', logs.join('\n'));
+            await browser.close();
+          })();
+          "
+      - name: Commit results
+        if: always()
+        run: |
+          git config user.email "a@a.com"
+          git config user.name "bot"
+          git add debug2.txt
+          git diff --staged --quiet || git commit -m "debug2"
+          git push
