@@ -1,4 +1,4 @@
-name: Check Bitrix24 Button
+name: Debug Bitrix24 Form with Puppeteer
 
 on:
   workflow_dispatch:
@@ -7,118 +7,165 @@ permissions:
   contents: write
 
 jobs:
-  check-site:
+  debug:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Install wget + try multiple methods
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install Puppeteer
+        run: npm install puppeteer
+
+      - name: Run debug script
         run: |
-          # Метод 1: wget с куками и полными заголовками
-          wget -q --no-check-certificate \
-            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
-            --header="Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
-            --header="Accept-Language: ru-RU,ru;q=0.9,en;q=0.8" \
-            --header="Accept-Encoding: gzip, deflate, br" \
-            --header="Connection: keep-alive" \
-            --header="Upgrade-Insecure-Requests: 1" \
-            -O page.html "https://neva-teplohod.ru/" 2>&1 || true
-          
-          SIZE=$(wc -c < page.html 2>/dev/null || echo 0)
-          echo "Method 1 (wget) size: $SIZE"
-          
-          if [ "$SIZE" -lt 1000 ]; then
-            echo "wget failed, trying curl with random IP..."
-            curl -s -L --max-time 30 \
-              -H "User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0" \
-              -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" \
-              -H "Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3" \
-              -H "Accept-Encoding: gzip, deflate, br" \
-              -H "DNT: 1" \
-              -H "Connection: keep-alive" \
-              -H "Upgrade-Insecure-Requests: 1" \
-              --compressed \
-              "https://neva-teplohod.ru/" -o page.html || true
-            echo "Method 2 (curl Firefox UA) size: $(wc -c < page.html)"
-          fi
+          node << 'JSEOF'
+          const puppeteer = require('puppeteer');
 
-      - name: Check HTTP status
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            "https://neva-teplohod.ru/")
-          echo "HTTP Status: $STATUS"
-          
-          # Посмотрим заголовки ответа
-          curl -s -I \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            "https://neva-teplohod.ru/" | head -20
+          (async () => {
+            const browser = await puppeteer.launch({
+              headless: true,
+              args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            const page = await browser.newPage();
 
-      - name: Analyze if page loaded
-        run: |
-          SIZE=$(wc -c < page.html 2>/dev/null || echo 0)
-          echo "Final page size: $SIZE bytes"
-          
-          if [ "$SIZE" -gt 5000 ]; then
-            python3 << 'PYEOF'
-          with open("page.html", "r", encoding="utf-8", errors="replace") as f:
-              html = f.read()
-          import re
+            // Перехватываем консольные сообщения
+            const consoleLogs = [];
+            page.on('console', msg => consoleLogs.push(msg.type() + ': ' + msg.text()));
+            page.on('pageerror', err => consoleLogs.push('PAGEERROR: ' + err.message));
 
-          print("=" * 50)
-          print("СКРИПТ БИТРИКС24:", "НАЙДЕН" if "loader_79" in html else "НЕ НАЙДЕН")
-          print("cdn-ru.bitrix24.ru:", "НАЙДЕН" if "cdn-ru.bitrix24.ru" in html else "НЕ НАЙДЕН")
-          print()
-          
-          btn_id = re.findall(r'<[^>]*id=["\']?open-b24-form["\']?[^>]*>', html)
-          print(f"Кнопка #open-b24-form: {'НАЙДЕНА' if btn_id else 'НЕ НАЙДЕНА'}")
-          for b in btn_id:
-              print(f"  HTML: {b[:300]}")
-          print()
-          
-          scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
-          handler = [s for s in scripts if "open-b24-form" in s or "openForm" in s]
-          print(f"Обработчик клика: {'НАЙДЕН' if handler else 'НЕ НАЙДЕН'}")
-          for h in handler:
-              print(h.strip()[:400])
-          print()
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+            
+            console.log('Opening page...');
+            await page.goto('https://neva-teplohod.ru/', {waitUntil: 'networkidle2', timeout: 60000});
+            
+            // Ждём загрузки скриптов
+            await new Promise(r => setTimeout(r, 3000));
 
-          # Кнопки с href
-          btns = re.findall(r'<a[^>]*>[\s\S]*?[Оо]ставить заявку[\s\S]*?</a>', html)
-          print(f"Кнопок 'Оставить заявку': {len(btns)}")
-          for i, b in enumerate(btns[:3]):
-              clean = re.sub(r'\s+', ' ', b).strip()
-              print(f"  [{i+1}] {clean[:300]}")
+            console.log('\n=== CONSOLE LOGS ===');
+            consoleLogs.forEach(l => console.log(l));
 
-          print()
-          print("=" * 50)
-          print("ДИАГНОЗ:")
-          if "loader_79" not in html:
-              print("  ОШИБКА: скрипт Битрикс24 не загружается на странице!")
-          elif not btn_id:
-              print("  ОШИБКА: кнопка не опубликована в Elementor (нет id=open-b24-form)")
-              print("  -> Нажмите ОПУБЛИКОВАТЬ в Elementor!")
-          elif not handler:
-              print("  ОШИБКА: нет обработчика клика в WPCode!")
-          else:
-              print("  Всё на месте. Проблема в порядке загрузки скриптов.")
-              # Проверяем href
-              for b in btns:
-                  if "open-b24-form" in b:
-                      if 'href="#"' in b:
-                          print("  ПРИЧИНА СКРОЛЛА: href='#' — страница скроллится наверх!")
-                          print("  РЕШЕНИЕ: поставить href='javascript:void(0)'")
-          'PYEOF'
-          else
-            echo "СТРАНИЦА НЕ ЗАГРУЗИЛАСЬ (размер $SIZE байт)"
-            echo "Сайт блокирует запросы от GitHub Actions (возможно Cloudflare)"
-            cat page.html
-          fi
+            // Проверяем наличие скрипта Битрикс24
+            const b24check = await page.evaluate(() => {
+              return {
+                hasB24form: typeof window.b24form !== 'undefined',
+                b24formType: typeof window.b24form,
+                b24formKeys: window.b24form ? Object.keys(window.b24form) : [],
+                hasB24formInit: typeof window.b24form !== 'undefined' && typeof window.b24form.App !== 'undefined',
+                // Все элементы с data-b24-form
+                b24elements: Array.from(document.querySelectorAll('[data-b24-form]')).map(el => ({
+                  tag: el.tagName,
+                  value: el.getAttribute('data-b24-form'),
+                  hasB24formProp: typeof el.b24form !== 'undefined'
+                })),
+                // Кнопки Оставить заявку
+                buttons: Array.from(document.querySelectorAll('a, button')).filter(el => 
+                  (el.innerText || '').includes('Оставить заявку')
+                ).map(el => ({
+                  tag: el.tagName,
+                  href: el.href || el.getAttribute('href'),
+                  id: el.id,
+                  classes: el.className,
+                  dataB24: el.getAttribute('data-b24-form'),
+                  hasClickListener: typeof el.onclick !== 'undefined'
+                }))
+              };
+            });
 
-      - name: Upload artifacts
+            console.log('\n=== BITRIX24 STATUS ===');
+            console.log('window.b24form exists:', b24check.hasB24formInit);
+            console.log('b24form type:', b24check.b24formType);
+            console.log('b24form keys:', JSON.stringify(b24check.b24formKeys));
+            
+            console.log('\n=== ELEMENTS WITH data-b24-form ===');
+            b24check.b24elements.forEach(el => {
+              console.log(el.tag, '|', el.value, '| b24form prop:', el.hasB24formProp);
+            });
+
+            console.log('\n=== BUTTONS "ОСТАВИТЬ ЗАЯВКУ" ===');
+            b24check.buttons.forEach((btn, i) => {
+              console.log('Button', i+1, ':', JSON.stringify(btn));
+            });
+
+            // Пробуем кликнуть на первую кнопку и смотрим что происходит
+            console.log('\n=== CLICKING BUTTON ===');
+            
+            const clickResult = await page.evaluate(() => {
+              const btn = Array.from(document.querySelectorAll('a, button')).find(el => 
+                (el.innerText || '').includes('Оставить заявку')
+              );
+              if (!btn) return 'NO BUTTON FOUND';
+              
+              // Проверяем обработчики событий через getEventListeners (только в DevTools)
+              // Пробуем через jQuery если есть
+              let jqEvents = 'no jQuery';
+              if (window.jQuery && window.jQuery._data) {
+                try {
+                  const events = window.jQuery._data(btn, 'events');
+                  jqEvents = events ? JSON.stringify(Object.keys(events)) : 'no jQuery events';
+                } catch(e) { jqEvents = 'jQuery error: ' + e.message; }
+              }
+              
+              return {
+                tag: btn.tagName,
+                href: btn.href,
+                id: btn.id,
+                dataB24: btn.getAttribute('data-b24-form'),
+                jqEvents: jqEvents,
+                outerHTML: btn.outerHTML.slice(0, 500)
+              };
+            });
+            
+            console.log('First button details:', JSON.stringify(clickResult, null, 2));
+
+            // Проверяем все скрипты в body
+            const scripts = await page.evaluate(() => {
+              return Array.from(document.querySelectorAll('script')).map(s => ({
+                src: s.src || null,
+                dataB24: s.getAttribute('data-b24-form'),
+                preview: s.textContent ? s.textContent.slice(0, 200) : null
+              })).filter(s => 
+                s.dataB24 || 
+                (s.preview && (s.preview.includes('b24') || s.preview.includes('bitrix')))
+              );
+            });
+            
+            console.log('\n=== B24 SCRIPTS ===');
+            scripts.forEach((s, i) => {
+              console.log('Script', i+1, ':', JSON.stringify(s));
+            });
+
+            // Проверяем событие b24:form:init
+            const formInitCheck = await page.evaluate(() => {
+              return new Promise(resolve => {
+                let received = false;
+                window.addEventListener('b24:form:init', function(e) {
+                  received = true;
+                  resolve({
+                    received: true,
+                    formId: e.detail && e.detail.object ? e.detail.object.identification : null
+                  });
+                });
+                setTimeout(() => {
+                  if (!received) resolve({received: false});
+                }, 5000);
+              });
+            });
+            
+            console.log('\n=== b24:form:init EVENT ===');
+            console.log(JSON.stringify(formInitCheck));
+
+            await browser.close();
+          })();
+          JSEOF
+
+      - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: site-analysis
-          path: page.html
+          name: debug-results
+          path: "*.png"
